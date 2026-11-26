@@ -71,6 +71,20 @@ Rarity: Common, Uncommon, Rare, Legendary.
   release it.
 - **Sound** toggles the speaker (saved). **?** opens a touch test.
 
+## Download and flash (no build needed)
+
+Ready-made firmware for both boards is on the
+[Releases page](https://github.com/timmy5d/ESPBattleBuddies/releases):
+`battlebuddies-cyd-full.bin` for the Cheap Yellow Display and
+`battlebuddies-round-amoled143-full.bin` for the Waveshare round AMOLED.
+
+1. Open [esptool-js](https://espressif.github.io/esptool-js/) in Chrome or Edge.
+2. Plug in the board, click **Connect** and pick its port.
+3. Set the flash address to `0x0`, choose the `-full.bin` file for your board
+   and click **Program**.
+
+If it won't connect, hold **BOOT**, tap **RST**, let go of BOOT and try again.
+
 ## Building and flashing
 
 You need [PlatformIO](https://platformio.org/) (VS Code extension or CLI).

@@ -1,0 +1,62 @@
+name: Release firmware
+
+# Builds both boards and publishes a GitHub release with ready-to-flash files.
+# Run it from the Actions tab ("Run workflow", give a version like v0.2),
+# or push a tag that starts with "v".
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag for the release (e.g. v0.2)"
+        required: true
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install platformio esptool
+      - run: pio run -e cyd -e amoled143
+      - name: Make single-file images (flash at address 0x0)
+        run: |
+          set -e
+          BOOT_APP0=$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -n1)
+          mkdir -p dist
+          python -m esptool --chip esp32 merge_bin -o dist/battlebuddies-cyd-full.bin \
+            --flash_mode keep --flash_freq keep --flash_size 4MB \
+            0x1000 .pio/build/cyd/bootloader.bin 0x8000 .pio/build/cyd/partitions.bin \
+            0xe000 "$BOOT_APP0" 0x10000 .pio/build/cyd/firmware.bin
+          python -m esptool --chip esp32s3 merge_bin -o dist/battlebuddies-round-amoled143-full.bin \
+            --flash_mode keep --flash_freq keep --flash_size 16MB \
+            0x0 .pio/build/amoled143/bootloader.bin 0x8000 .pio/build/amoled143/partitions.bin \
+            0xe000 "$BOOT_APP0" 0x10000 .pio/build/amoled143/firmware.bin
+          cp .pio/build/cyd/firmware.bin dist/battlebuddies-cyd-app-only.bin
+          cp .pio/build/amoled143/firmware.bin dist/battlebuddies-round-amoled143-app-only.bin
+          ls -l dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: BattleBuddies ${{ github.event.inputs.version || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            Ready-to-flash firmware for both boards. Pick the file for your board:
+
+            | Board | File |
+            | --- | --- |
+            | ESP32-2432S028R "Cheap Yellow Display" (2.8in, 240x320) | `battlebuddies-cyd-full.bin` |
+            | Waveshare ESP32-S3-Touch-AMOLED-1.43 (round 466x466, with or without the CNC case) | `battlebuddies-round-amoled143-full.bin` |
+
+            **Flash from your browser (Chrome or Edge):** open https://espressif.github.io/esptool-js/ , click Connect and pick your board's port, set the flash address to `0x0`, choose the `-full.bin` file, then click Program. If it can't connect, hold BOOT, tap RST, let go of BOOT and try again.
+
+            **Or with esptool:** `esptool.py write_flash 0x0 battlebuddies-<board>-full.bin`
+
+            The `-app-only.bin` files are for updating a board that already runs BattleBuddies (flash at `0x10000`). Your collection is kept when you update.
+          files: dist/*.bin
