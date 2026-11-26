@@ -66,6 +66,18 @@ int main() {
   go(S_BOT_ROUND); frame(300); save("14_bot_won");
 
   go(S_CLOCK); frame(50);      save("15_clock");
+
+  battleKind = BK_FRIEND; fighterIndex = 3;
+  go(S_FRIEND_FIND); frame(800); save("17_friend_find");
+  go(S_FRIEND_WAIT); frame(300); save("18_friend_wait");
+  foeMon = makeMonster(linkPeerSeed(), false); foeLv = 6;
+  go(S_BATTLE); frame(300);
+  bMove[0] = SPOCK; linkCommit(0, SPOCK); drawMoveButtons(false);
+  battleMessage("Throw locked in!", MINT, "Waiting for your friend...", DIM);
+  bPhase = BP_WAIT; frame(30); save("19_friend_battle");
+  friendEnd = FE_WON; friendXp = 16; friendLevelUp = false;
+  go(S_FRIEND_END); frame(300); save("20_friend_end");
+  battleKind = BK_WILD;
   go(S_TOUCHTEST);
   tapX = 120; tapY = 300; frame(30);
   save("16_touch_test");

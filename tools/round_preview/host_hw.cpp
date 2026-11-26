@@ -104,3 +104,21 @@ uint32_t totalScans() { return 42; }
 void countScan() {}
 bool loadSoundSetting() { return true; }
 void saveSoundSetting(bool) {}
+
+// ---- friend link: pretend a friend is always there
+#include "link.h"
+LinkState linkStateNow = LINK_OFF;
+void linkStart() { linkStateNow = LINK_SEARCHING; }
+void linkStop(bool) { linkStateNow = LINK_OFF; }
+void linkPoll() {}
+LinkState linkState() { return linkStateNow; }
+bool linkPeerLeft() { return false; }
+bool linkCheated() { return false; }
+void linkSendTeam(uint32_t, bool, uint8_t) {}
+bool linkHaveTeam() { return false; }
+uint32_t linkPeerSeed() { return 0xF00DCAFEu; }
+bool linkPeerNight() { return false; }
+uint8_t linkPeerLevel() { return 6; }
+uint32_t linkBattleSeed() { return 77; }
+void linkCommit(uint16_t, uint8_t) {}
+bool linkTurnReady(uint16_t, uint8_t&) { return false; }

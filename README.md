@@ -102,7 +102,8 @@ These boards come in a few variants. Settings live in `platformio.ini` and
 
 The same game also runs on the Waveshare **ESP32-S3-Touch-AMOLED-1.43**
 (466x466 round AMOLED, capacitive touch; the CNC metal case version is sold
-as the "-1.43-B"). Same buddies, battles, Bot 9000 and save format; only the
+as the "-1.43-B"). Same buddies, battles, Bot 9000, friend battles (also
+against a CYD) and save format; only the
 screens are laid out for a circle.
 
 ```sh

@@ -21,6 +21,7 @@
 #include "render.h"
 #include "scanner.h"
 #include "storage.h"
+#include "link.h"
 #include "splash_logo.h"
 
 Canvas& tft = canvas();
@@ -161,7 +162,8 @@ void showMonster(const Monster& m, int cx, int cy, int size, uint32_t t, uint16_
 
 // ---------------------------------------------------------------- state
 enum Screen { S_TITLE, S_SCAN, S_PICK, S_ENCOUNTER, S_RESULT, S_COLLECTION, S_DETAIL, S_TOUCHTEST,
-              S_FIGHTER, S_BATTLE, S_BOT_INTRO, S_BOT_ROUND, S_CLOCK };
+              S_FIGHTER, S_BATTLE, S_BOT_INTRO, S_BOT_ROUND, S_FRIEND_FIND, S_FRIEND_WAIT, S_FRIEND_END,
+              S_CLOCK };
 Screen screen = S_TITLE;
 uint32_t screenStart = 0;
 void go(Screen s);
@@ -184,11 +186,13 @@ const Btn B_WIFI  {70, 296, 158, 48, "WiFi scan", GO, F_SMB};
 const Btn B_BT    {238, 296, 158, 48, "Bluetooth", rgb565(60, 120, 230), F_SMB};
 const Btn B_COLL  {84, 352, 144, 46, "Collection", BTN, F_SMB};
 const Btn B_BOT   {238, 352, 144, 46, "Bot 9000", rgb565(200, 70, 70), F_SMB};
-const Btn B_CLOCK {140, 406, 110, 36, "Clock", BTN2, F_XS};
-const Btn B_TEST  {258, 406, 48, 36, "?", BTN2, F_SMB};
+const Btn B_FRIEND{163, 404, 140, 40, "Friend", rgb565(170, 90, 210), F_SMB};
+const Btn B_CLOCK {40, 182, 96, 40, "Clock", BTN2, F_XS};
+const Btn B_TEST  {354, 182, 64, 40, "?", BTN2, F_SMB};
 ScanMode scanMode = MODE_WIFI;
 bool scanForBot = false;
 void startBotMatch();
+void startFriendMatch();
 uint32_t clockDrawnAt = 0;
 
 void drawTitleClock() {
@@ -215,6 +219,7 @@ void enterTitle() {
   drawBtn(B_BT);
   drawBtn(B_COLL);
   drawBtn(B_BOT);
+  drawBtn(B_FRIEND);
   drawBtn(B_CLOCK);
   drawBtn(B_TEST);
 }
@@ -229,8 +234,13 @@ void updateTitle(uint32_t t) {
   else if (hit(B_COLL, x, y)) { sfxClick(); collectionPage = 0; go(S_COLLECTION); }
   else if (hit(B_BOT, x, y)) {
     sfxClick();
-    if (collectionSize() == 0) { drawBtn(B_BOT, "Need a buddy"); return; }
+    if (collectionSize() == 0) { drawBtn(B_BOT, "No buddy"); return; }
     startBotMatch();
+  }
+  else if (hit(B_FRIEND, x, y)) {
+    sfxClick();
+    if (collectionSize() == 0) { drawBtn(B_FRIEND, "No buddy"); return; }
+    startFriendMatch();
   }
   else if (hit(B_CLOCK, x, y)) { sfxClick(); go(S_CLOCK); }
   else if (hit(B_TEST, x, y))  { go(S_TOUCHTEST); }
@@ -420,7 +430,7 @@ void updatePick(uint32_t t) {
 const Btn B_CATCH = actMain("BATTLE!", GO, F_MD);
 const Btn B_RUN   = actSide("Run");
 
-enum BattleKind : uint8_t { BK_WILD, BK_BOT };
+enum BattleKind : uint8_t { BK_WILD, BK_BOT, BK_FRIEND };
 BattleKind battleKind = BK_WILD;
 void startWildBattle();
 
@@ -756,11 +766,21 @@ Monster foeMon;
 uint8_t foeLv = 1;
 const Btn B_FCANCEL {163, 396, 140, 40, "Cancel", BTN2, F_SMB};
 
+void fighterChosen() {
+  if (battleKind == BK_FRIEND) {   // tell the friend's board who's coming, then wait for theirs
+    Owned o = collectionAt(fighterIndex);
+    linkSendTeam(o.seed, ownedNight(o), o.level);
+    go(S_FRIEND_WAIT);
+  } else {
+    go(S_BATTLE);
+  }
+}
+
 void chooseFighter() {
   int only = -1, n = 0;
   for (size_t i = 0; i < collectionSize(); i++)
     if (!(battleKind == BK_BOT && koOut[i])) { only = i; n++; }
-  if (n == 1) { fighterIndex = only; go(S_BATTLE); return; }
+  if (n == 1) { fighterIndex = only; fighterChosen(); return; }
   collectionPage = 0;
   go(S_FIGHTER);
 }
@@ -779,7 +799,8 @@ void enterFighter() {
   collectionPage = constrain(collectionPage, 0, pageCount() - 1);
   text("Pick a fighter", CX, 54, F_MD, GOLD);
   char buf[44];
-  snprintf(buf, sizeof(buf), "vs %s  Lv %u  %s", foeMon.name, foeLv, elementName(foeMon.element));
+  if (battleKind == BK_FRIEND) snprintf(buf, sizeof(buf), "Friend battle - your friend is picking too");
+  else snprintf(buf, sizeof(buf), "vs %s  Lv %u  %s", foeMon.name, foeLv, elementName(foeMon.element));
   text(buf, CX, 82, F_XS, DIM, MC_DATUM, 300);
   for (int i = 0; i < GRID; i++) {
     size_t idx = collectionPage * GRID + i;
@@ -793,6 +814,7 @@ void enterFighter() {
 
 void cancelFight() {
   if (battleKind == BK_WILD) go(S_ENCOUNTER);
+  else if (battleKind == BK_FRIEND) { linkStop(true); go(S_TITLE); }
   else { roundWinner = -1; go(S_BOT_ROUND); }
 }
 
@@ -807,7 +829,7 @@ void updateFighter(uint32_t) {
   if (battleKind == BK_BOT && koOut[idx]) { sfxMiss(); return; }
   sfxClick();
   fighterIndex = idx;
-  go(S_BATTLE);
+  fighterChosen();
 }
 
 // ---------------------------------------------------------------- battle
@@ -815,7 +837,7 @@ void updateFighter(uint32_t) {
 // bottom of the circle. The rules live in battle.*.
 Battle battle;
 TurnResult lastTurn;
-enum BattlePhase { BP_CHOOSE, BP_REVEAL, BP_RESULT } bPhase;
+enum BattlePhase { BP_CHOOSE, BP_WAIT, BP_REVEAL, BP_RESULT } bPhase;   // BP_WAIT: friend's throw not in yet
 uint32_t bPhaseAt;
 uint8_t  bMove[2];
 float    shownHp[2];
@@ -880,7 +902,7 @@ void battleMessage(const char* line1, uint16_t c1, const char* line2, uint16_t c
 void enterBattle() {
   Owned o = collectionAt(fighterIndex);
   Monster mine = makeMonster(o.seed, ownedNight(o));
-  battleBegin(battle, mine, o.level, foeMon, foeLv, esp_random());
+  battleBegin(battle, mine, o.level, foeMon, foeLv, battleKind == BK_FRIEND ? linkBattleSeed() : esp_random());
   shownHp[0] = battle.f[0].hp;
   shownHp[1] = battle.f[1].hp;
   bPhase = BP_CHOOSE;
@@ -895,6 +917,9 @@ void enterBattle() {
   if (battleKind == BK_BOT) {
     snprintf(buf, sizeof(buf), "BOT 9000 sends out %s! (%d/%d)", foeMon.name, botNext + 1, BOT_TEAM);
     text(buf, CX, 52, F_XS, BOT_RED, MC_DATUM, 270);
+  } else if (battleKind == BK_FRIEND) {
+    snprintf(buf, sizeof(buf), "Your friend sent %s!", foeMon.name);
+    text(buf, CX, 52, F_SM, rgb565(200, 150, 255), MC_DATUM, 270);
   } else {
     snprintf(buf, sizeof(buf), "Win to catch %s!", foeMon.name);
     text(buf, CX, 52, F_SM, GOLD, MC_DATUM, 270);
@@ -966,6 +991,10 @@ void showTurnResult() {
   battleMessage(l1, c1, l2, c2);
 }
 
+enum FriendEnd : uint8_t { FE_WON, FE_LOST, FE_YOU_LEFT, FE_FRIEND_LEFT, FE_LINK_LOST, FE_CHEAT } friendEnd;
+uint16_t friendXp = 0;
+bool friendLevelUp = false;
+
 void finishBattle() {
   bool won = !battleFled && battleWinner(battle) == 0;
   uint16_t xp = won ? battleXp(battle.f[1]) : 0;
@@ -990,6 +1019,14 @@ void finishBattle() {
       }
     }
     go(S_RESULT);
+    return;
+  }
+
+  if (battleKind == BK_FRIEND) {
+    friendXp = xp;
+    friendLevelUp = lvUp;
+    friendEnd = battleFled ? FE_YOU_LEFT : won ? FE_WON : FE_LOST;
+    go(S_FRIEND_END);
     return;
   }
 
@@ -1021,6 +1058,7 @@ void updateBattle(uint32_t t) {
       if (!touchTapped(x, y)) return;
       if (hit(B_FLEE, x, y)) {
         sfxFled();
+        if (battleKind == BK_FRIEND) linkStop(true);   // your friend wins
         battleFled = true;
         finishBattle();
         return;
@@ -1029,6 +1067,14 @@ void updateBattle(uint32_t t) {
         if (!hit(B_MOVE[m], x, y)) continue;
         sfxClick();
         bMove[0] = m;
+        if (battleKind == BK_FRIEND) {   // lock in my throw, then wait for my friend's
+          linkCommit(battle.turn, m);
+          drawMoveButtons(false);
+          battleMessage("Throw locked in!", MINT, "Waiting for your friend...", DIM);
+          bPhase = BP_WAIT;
+          bPhaseAt = now;
+          return;
+        }
         bMove[1] = aiChooseMove(battle, 1, esp_random());
         drawMoveButtons(false);
         char buf[40];
@@ -1039,6 +1085,18 @@ void updateBattle(uint32_t t) {
         return;
       }
       return;
+
+    case BP_WAIT: {   // friend battle: both throws are locked in once the reveal arrives
+      uint8_t theirs;
+      if (!linkTurnReady(battle.turn, theirs)) return;
+      bMove[1] = theirs;
+      char buf[40];
+      snprintf(buf, sizeof(buf), "You: %s   Friend: %s", moveName(bMove[0]), moveName(bMove[1]));
+      battleMessage("Ready... throw!", DIM, buf, INK);
+      bPhase = BP_REVEAL;
+      bPhaseAt = now;
+      return;
+    }
 
     case BP_REVEAL:
       if (since < 750) return;
@@ -1208,6 +1266,138 @@ void updateBotRound(uint32_t t) {
   }
 }
 
+// ---------------------------------------------------------------- friend battle
+// Two boards battle over ESP-NOW (see link.h); works with a CYD on the other
+// end too, since both run the same link and battle code.
+const uint16_t FRIEND_PURPLE = rgb565(170, 90, 210);
+const Btn B_FCANCEL2 {163, 404, 140, 40, "Cancel", BTN2, F_SMB};
+const Btn B_FAGAIN = actMain("Battle again", GO);
+uint32_t pairedAt = 0;
+
+void startFriendMatch() {
+  battleKind = BK_FRIEND;
+  linkStart();
+  go(S_FRIEND_FIND);
+}
+
+void enterFriendFind() {
+  ledColor(1, 0, 1);
+  pairedAt = 0;
+  blipCount = 0;
+  tft.clear(BG);
+  starSeed = 0;
+  text("FRIEND BATTLE", CX, 70, F_MD, FRIEND_PURPLE);
+  text("Looking for another board...", CX, 104, F_SM, DIM, MC_DATUM, 330);
+  radarCx = CX; radarCy = 234; radarR = 96;
+  text("Tap Friend on both boards", CX, 356, F_SMB, INK, MC_DATUM, 340);
+  text("Keep them close together", CX, 382, F_XS, DIM);
+  drawBtn(B_FCANCEL2);
+}
+
+void updateFriendFind(uint32_t t) {
+  drawRadar(t);
+  if (t - lastPing > 1050) { sfxScanPing(); lastPing = t; }
+  if (linkState() == LINK_PAIRED) {
+    if (!pairedAt) {
+      pairedAt = millis();
+      sfxFound();
+      ledColor(0, 1, 0);
+      clearBand(340, 396);
+      text("Found a friend!", CX, 366, F_MD, MINT);
+    } else if (millis() - pairedAt > 900) {
+      chooseFighter();
+    }
+    return;
+  }
+  int x, y;
+  if (touchTapped(x, y) && hit(B_FCANCEL2, x, y)) { sfxClick(); linkStop(true); go(S_TITLE); }
+}
+
+void enterFriendWait() {
+  tft.clear(BG);
+  starSeed = 0;
+  text("FRIEND BATTLE", CX, 70, F_MD, FRIEND_PURPLE);
+  Owned o = collectionAt(fighterIndex);
+  Monster m = makeMonster(o.seed, ownedNight(o));
+  char buf[40];
+  snprintf(buf, sizeof(buf), "You sent %s (Lv %u)", m.name, o.level);
+  text(buf, CX, 106, F_SMB, INK, MC_DATUM, 330);
+  text("Waiting for your friend to pick...", CX, 350, F_SM, DIM, MC_DATUM, 360);
+  drawBtn(B_FCANCEL2);
+}
+
+void updateFriendWait(uint32_t t) {
+  Owned o = collectionAt(fighterIndex);
+  showMonster(makeMonster(o.seed, ownedNight(o)), CX, 224, 110, t);
+  if (linkHaveTeam()) {
+    foeMon = makeMonster(linkPeerSeed(), linkPeerNight());
+    foeLv = linkPeerLevel();
+    go(S_BATTLE);
+    return;
+  }
+  int x, y;
+  if (touchTapped(x, y) && hit(B_FCANCEL2, x, y)) { sfxClick(); linkStop(true); go(S_TITLE); }
+}
+
+void enterFriendEnd() {
+  tft.clear(BG);
+  starfield(foeMon.seed ^ 55);
+  char buf[48];
+  const char* title = "";
+  uint16_t tc = INK;
+  const char* line = "";
+  switch (friendEnd) {
+    case FE_WON:         title = "Victory!";        tc = MINT; line = "You beat your friend!"; break;
+    case FE_LOST:        title = "Defeated";        tc = RED;  line = "Your friend won this one"; break;
+    case FE_YOU_LEFT:    title = "You ran";         tc = DIM;  line = "Your friend wins this one"; break;
+    case FE_FRIEND_LEFT: title = "Friend left";     tc = GOLD; line = "Your friend ran off"; break;
+    case FE_LINK_LOST:   title = "Connection lost"; tc = RED;  line = "Move the boards closer and try again"; break;
+    case FE_CHEAT:       title = "Battle stopped";  tc = RED;  line = "A throw didn't match its lock"; break;
+  }
+  text(title, CX, 72, F_LG, tc, MC_DATUM, 330);
+  text(line, CX, 278, F_SMB, INK, MC_DATUM, 410);
+  if (friendXp) {
+    Owned o = collectionAt(fighterIndex);
+    Monster m = makeMonster(o.seed, ownedNight(o));
+    if (friendLevelUp) snprintf(buf, sizeof(buf), "%s +%u XP - Level up! Lv %u", m.name, friendXp, o.level);
+    else               snprintf(buf, sizeof(buf), "%s +%u XP", m.name, friendXp);
+    text(buf, CX, 310, F_SM, friendLevelUp ? GOLD : MINT, MC_DATUM, 390);
+  }
+  if (friendEnd == FE_WON || friendEnd == FE_FRIEND_LEFT) { sfxCaught(); ledColor(0, 1, 0); }
+  else { sfxFled(); ledColor(1, 0, 0); }
+  drawBtn(B_FAGAIN);
+  drawBtn(B_HOME);
+}
+
+void updateFriendEnd(uint32_t t) {
+  Owned o = collectionAt(fighterIndex);
+  showMonster(makeMonster(o.seed, ownedNight(o)), CX, 178, 110, t);
+  int x, y;
+  if (!touchTapped(x, y)) return;
+  if (hit(B_FAGAIN, x, y)) { sfxClick(); linkStop(true); startFriendMatch(); }
+  else if (hit(B_HOME, x, y)) { sfxClick(); linkStop(true); go(S_TITLE); }
+}
+
+// If the friend's board leaves or goes quiet mid-match, stop and say so.
+void checkFriendLink() {
+  if (battleKind != BK_FRIEND || linkState() != LINK_LOST) return;
+  bool inBattle = screen == S_BATTLE && !battleOver(battle);
+  bool active = inBattle || screen == S_FRIEND_FIND || screen == S_FRIEND_WAIT || screen == S_FIGHTER;
+  if (!active) return;
+  friendXp = 0;
+  friendLevelUp = false;
+  if (linkCheated()) friendEnd = FE_CHEAT;
+  else if (linkPeerLeft()) {
+    friendEnd = FE_FRIEND_LEFT;
+    if (inBattle) {   // they ran mid-battle: you win
+      friendXp = battleXp(battle.f[1]);
+      friendLevelUp = giveXp(fighterIndex, friendXp);
+    }
+  } else friendEnd = FE_LINK_LOST;
+  linkStop(false);
+  go(S_FRIEND_END);
+}
+
 // ---------------------------------------------------------------- clock (night forms)
 // This board has no light sensor, so night forms follow the clock instead.
 const Btn B_HUP   {110, 126, 96, 44, "+", BTN, F_MD};
@@ -1309,6 +1499,9 @@ void go(Screen s) {
     case S_BATTLE:     enterBattle(); break;
     case S_BOT_INTRO:  enterBotIntro(); break;
     case S_BOT_ROUND:  enterBotRound(); break;
+    case S_FRIEND_FIND: enterFriendFind(); break;
+    case S_FRIEND_WAIT: enterFriendWait(); break;
+    case S_FRIEND_END:  enterFriendEnd(); break;
     case S_CLOCK:      enterClock(); break;
   }
 }
@@ -1376,8 +1569,13 @@ void loop() {
     case S_BATTLE:     updateBattle(t); break;
     case S_BOT_INTRO:  updateBotIntro(t); break;
     case S_BOT_ROUND:  updateBotRound(t); break;
+    case S_FRIEND_FIND: updateFriendFind(t); break;
+    case S_FRIEND_WAIT: updateFriendWait(t); break;
+    case S_FRIEND_END:  updateFriendEnd(t); break;
     case S_CLOCK:      updateClock(t); break;
   }
+  linkPoll();          // no-op unless a friend link is running
+  checkFriendLink();
   displayFlush();
   delay(8);
 }
