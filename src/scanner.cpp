@@ -6,28 +6,41 @@
 #include "monster.h"
 
 namespace {
-struct Candidate { uint8_t id[6]; int8_t rssi; uint8_t source; };
+struct Candidate { uint8_t id[6]; int8_t rssi; uint8_t source; char name[21]; };
 const int MAX_CANDIDATES = 48;
 Candidate cands[MAX_CANDIDATES];
 int candCount = 0;
 uint16_t wifiCount = 0, bleCount = 0;
 
 ScanPhase phase = SCAN_IDLE;
+ScanMode scanMode = MODE_WIFI;
 volatile bool bleDone = false;
 ScanResult result{};
 
 void onBleDone(NimBLEScanResults) { bleDone = true; }
 
-void addCandidate(const uint8_t* id, int rssi, uint8_t source) {
+void addCandidate(const uint8_t* id, int rssi, uint8_t source, const char* name) {
   if (candCount >= MAX_CANDIDATES) return;
   Candidate& c = cands[candCount++];
   memcpy(c.id, id, 6);
   c.rssi = (int8_t)constrain(rssi, -127, 0);
   c.source = source;
+  strlcpy(c.name, name ? name : "", sizeof(c.name));
+}
+
+// Strongest (closest) first, so the radar and the list read naturally.
+void sortByStrength() {
+  for (int i = 1; i < candCount; i++) {
+    Candidate c = cands[i];
+    int j = i - 1;
+    while (j >= 0 && cands[j].rssi < c.rssi) { cands[j + 1] = cands[j]; j--; }
+    cands[j + 1] = c;
+  }
 }
 
 // Pick one signal, favouring strong (nearby) ones.
 void choose() {
+  sortByStrength();
   result = {};
   result.wifiCount = wifiCount;
   result.bleCount = bleCount;
@@ -82,6 +95,7 @@ static void startBle() {
 
 void scannerStart(ScanMode mode) {
   candCount = 0; wifiCount = 0; bleCount = 0;
+  scanMode = mode;
   if (mode == MODE_BLE) { startBle(); return; }
   WiFi.scanDelete();
   WiFi.scanNetworks(true, true);   // async, include hidden networks
@@ -96,10 +110,11 @@ ScanPhase scannerPoll() {
       wifiCount = n;
       for (int i = 0; i < n; i++) {
         uint8_t* bssid = WiFi.BSSID(i);
-        if (bssid) addCandidate(bssid, WiFi.RSSI(i), SRC_WIFI);
+        if (bssid) addCandidate(bssid, WiFi.RSSI(i), SRC_WIFI, WiFi.SSID(i).c_str());
       }
     }
     WiFi.scanDelete();
+    if (scanMode == MODE_BOTH) { startBle(); return phase; }
     choose();
     phase = SCAN_DONE;
   } else if (phase == SCAN_BLE) {
@@ -108,7 +123,7 @@ ScanPhase scannerPoll() {
     bleCount = res.getCount();
     for (uint32_t i = 0; i < res.getCount(); i++) {
       NimBLEAdvertisedDevice d = res.getDevice(i);
-      addCandidate(d.getAddress().getNative(), d.getRSSI(), SRC_BLE);
+      addCandidate(d.getAddress().getNative(), d.getRSSI(), SRC_BLE, d.getName().c_str());
     }
     NimBLEDevice::getScan()->clearResults();
     choose();
@@ -118,3 +133,16 @@ ScanPhase scannerPoll() {
 }
 
 ScanResult scannerResult() { return result; }
+
+int scannerSignalCount() { return phase == SCAN_DONE ? candCount : 0; }
+
+ScanSignal scannerSignal(int i) {
+  ScanSignal s{};
+  if (i < 0 || i >= candCount) return s;
+  const Candidate& c = cands[i];
+  s.seed = seedFromBytes(c.id, 6, c.source);   // same seed choose() would give
+  s.source = c.source;
+  s.rssi = c.rssi;
+  memcpy(s.name, c.name, sizeof(s.name));
+  return s;
+}

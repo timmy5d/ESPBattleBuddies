@@ -2,8 +2,9 @@
 
 An original pocket monster game for the ESP32-2432S028R "Cheap Yellow
 Display" (2.8" 240x320 touch screen). Scan the radio signals around you to
-discover a buddy, capture it with a timing mini-game, and build a collection.
-Battles between two boards are coming in v0.2.
+discover a buddy, beat it in a Rock Paper Scissors Lizard Spock battle to
+catch it, and build a collection. Then take your team up against Battle Bot
+9000. The same battle is used everywhere; battles between two boards are next.
 
 ![Sixteen buddies drawn by the firmware's renderer](docs/buddies.png)
 
@@ -32,12 +33,32 @@ Rarity: Common, Uncommon, Rare, Legendary.
 
 ## Controls
 
-- **WiFi scan** or **Bluetooth** runs the radar for that kind of signal, then
-  shows what you found. **Scan again** repeats the last kind.
-- **CAPTURE** starts the mini-game: tap when the red marker is in the green
-  zone (gold centre = perfect). Rarer buddies have smaller zones and faster
-  markers. You get three tries.
-- Capturing a buddy you already own gives it XP instead, and it levels up.
+- **WiFi scan** or **Bluetooth** runs the radar for that kind of signal.
+  **Scan again** repeats the last kind.
+- When the scan finishes, every signal it heard (up to the 16 strongest) shows
+  up as a blip on the radar. Closer to the middle means a stronger signal, the
+  colour is the element of the buddy living there, and a white ring means you
+  already have it. Tap a blip to see the network or gadget name, then tap
+  **Track it!** (or the same blip again) to meet that buddy. **Run** takes you
+  back to the radar so you can pick another.
+- **BATTLE!** on a wild buddy: pick one of your buddies to fight it. Win and
+  the wild buddy joins your team (if you already have it, it gets XP instead),
+  and your fighter earns XP too. Lose or **Run** and it gets away.
+- Your very first buddy is free: with an empty collection the first wild buddy
+  you meet offers to **Befriend** you, no battle needed.
+- **Bot 9000** on the title screen: Battle Bot 9000 scans the WiFi and
+  Bluetooth around him and builds a brand-new team of three from those
+  signals, levelled near your best buddies. Each round you pick a fighter;
+  a knocked-out buddy sits out the rest of the match. Beat all three to win
+  (+20 XP bonus for everyone who fought); **Give up** ends the match.
+- **Battles** (wild, Bot 9000, and later a friend's board) all work the same:
+  every turn you both throw Rock, Paper, Scissors, Lizard or Spock (the usual
+  rules: scissors cuts paper, Spock vaporizes rock...). The winner of the throw
+  hits, harder with more ATK against less DEF. On a tie the faster buddy gets
+  a small scrape in. Each element has a favoured throw worth +50% damage
+  (highlighted in your buddy's colour): Stone Rock, Moss Paper, Volt Scissors,
+  Ember Lizard, Shade Spock. Tide has none but always lands a half hit on
+  ties. Winning a battle gives your fighter XP.
 - **Collection** shows your buddies, 9 per page. Tap one for its stats, or to
   release it.
 - **Sound** toggles the speaker (saved). **?** opens a touch test.
@@ -77,11 +98,14 @@ These boards come in a few variants. Settings live in `platformio.ini` and
 | `src/render.*` | Draws a monster from its traits at any size |
 | `src/scanner.*` | WiFi + Bluetooth scan and signal pick |
 | `src/storage.*` | Collection saved in flash (NVS) |
+| `src/battle.*` | Battle rules (RPSLS throws, damage, AI), no hardware |
 | `src/hw.*` | Touch, sound, RGB LED, light sensor |
 | `src/main.cpp` | Screens and game flow |
 
 ## Roadmap
 
-- **v0.1** scan, capture, collect (this)
-- **v0.2** battles between two boards over ESP-NOW, type advantages
+- **v0.1** scan, capture, collect
+- **v0.2** battles: Rock Paper Scissors Lizard Spock against a computer
+  buddy (done), then between two boards over ESP-NOW (the battle core is
+  deterministic, so boards only need to swap seed, level and each throw)
 - later: trading, evolutions, an optional UART barcode module
