@@ -34,3 +34,8 @@
 #define WILD_SCAN_MIN_MS 2500   // the radar runs at least this long
 #define BLE_SCAN_SECONDS    2
 #define SOUND_VOLUME       60   // 0-511; the speaker is loud
+
+// ---- Friend battles (ESP-NOW) ----
+#define FRIEND_CHANNEL      1      // both boards must use the same WiFi channel
+#define LINK_RESEND_MS    250      // re-send the latest packet this often
+#define LINK_TIMEOUT_MS 12000      // friend silent this long = connection lost

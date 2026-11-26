@@ -51,7 +51,15 @@ Rarity: Common, Uncommon, Rare, Legendary.
   signals, levelled near your best buddies. Each round you pick a fighter;
   a knocked-out buddy sits out the rest of the match. Beat all three to win
   (+20 XP bonus for everyone who fought); **Give up** ends the match.
-- **Battles** (wild, Bot 9000, and later a friend's board) all work the same:
+- **Friend** on the title screen: tap it on two boards near each other. They
+  find each other over ESP-NOW (WiFi channel 1, no router needed), each player
+  picks a buddy, and you battle. Each turn your throw is locked in secretly
+  (the board sends a hash of it first and only reveals it once your friend's
+  throw is locked in too), so nobody can peek. Both boards run the same
+  battle engine with a shared seed, so they always agree. The winner's buddy
+  gets XP; running gives your friend the win. If the other board leaves or
+  goes quiet for 12 s, you get told instead of waiting forever.
+- **Battles** (wild, Bot 9000 and friend) all work the same:
   every turn you both throw Rock, Paper, Scissors, Lizard or Spock (the usual
   rules: scissors cuts paper, Spock vaporizes rock...). The winner of the throw
   hits, harder with more ATK against less DEF. On a tie the faster buddy gets
