@@ -13,6 +13,7 @@ int candCount = 0;
 uint16_t wifiCount = 0, bleCount = 0;
 
 ScanPhase phase = SCAN_IDLE;
+ScanMode scanMode = MODE_WIFI;
 volatile bool bleDone = false;
 ScanResult result{};
 
@@ -94,6 +95,7 @@ static void startBle() {
 
 void scannerStart(ScanMode mode) {
   candCount = 0; wifiCount = 0; bleCount = 0;
+  scanMode = mode;
   if (mode == MODE_BLE) { startBle(); return; }
   WiFi.scanDelete();
   WiFi.scanNetworks(true, true);   // async, include hidden networks
@@ -112,6 +114,7 @@ ScanPhase scannerPoll() {
       }
     }
     WiFi.scanDelete();
+    if (scanMode == MODE_BOTH) { startBle(); return phase; }
     choose();
     phase = SCAN_DONE;
   } else if (phase == SCAN_BLE) {

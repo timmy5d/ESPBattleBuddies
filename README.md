@@ -2,9 +2,9 @@
 
 An original pocket monster game for the ESP32-2432S028R "Cheap Yellow
 Display" (2.8" 240x320 touch screen). Scan the radio signals around you to
-discover a buddy, capture it with a timing mini-game, and build a collection.
-Then battle with it in Rock Paper Scissors Lizard Spock; battles between
-two boards are next.
+discover a buddy, beat it in a Rock Paper Scissors Lizard Spock battle to
+catch it, and build a collection. Then take your team up against Battle Bot
+9000. The same battle is used everywhere; battles between two boards are next.
 
 ![Sixteen buddies drawn by the firmware's renderer](docs/buddies.png)
 
@@ -41,20 +41,26 @@ Rarity: Common, Uncommon, Rare, Legendary.
   already have it. Tap a blip to see the network or gadget name, then tap
   **Track it!** (or the same blip again) to meet that buddy. **Run** takes you
   back to the radar so you can pick another.
-- **CAPTURE** starts the mini-game: tap when the red marker is in the green
-  zone (gold centre = perfect). Rarer buddies have smaller zones and faster
-  markers. You get three tries.
-- Capturing a buddy you already own gives it XP instead, and it levels up.
-- **Collection** shows your buddies, 9 per page. Tap one for its stats, or to
-  release it.
-- **Battle** (on a buddy's stats page) fights a wild buddy near its level.
-  Every turn you both throw Rock, Paper, Scissors, Lizard or Spock (the usual
+- **BATTLE!** on a wild buddy: pick one of your buddies to fight it. Win and
+  the wild buddy joins your team (if you already have it, it gets XP instead),
+  and your fighter earns XP too. Lose or **Run** and it gets away.
+- Your very first buddy is free: with an empty collection the first wild buddy
+  you meet offers to **Befriend** you, no battle needed.
+- **Bot 9000** on the title screen: Battle Bot 9000 scans the WiFi and
+  Bluetooth around him and builds a brand-new team of three from those
+  signals, levelled near your best buddies. Each round you pick a fighter;
+  a knocked-out buddy sits out the rest of the match. Beat all three to win
+  (+20 XP bonus for everyone who fought); **Give up** ends the match.
+- **Battles** (wild, Bot 9000, and later a friend's board) all work the same:
+  every turn you both throw Rock, Paper, Scissors, Lizard or Spock (the usual
   rules: scissors cuts paper, Spock vaporizes rock...). The winner of the throw
   hits, harder with more ATK against less DEF. On a tie the faster buddy gets
   a small scrape in. Each element has a favoured throw worth +50% damage
   (highlighted in your buddy's colour): Stone Rock, Moss Paper, Volt Scissors,
   Ember Lizard, Shade Spock. Tide has none but always lands a half hit on
-  ties. Win to earn XP; **Run** leaves the battle.
+  ties. Winning a battle gives your fighter XP.
+- **Collection** shows your buddies, 9 per page. Tap one for its stats, or to
+  release it.
 - **Sound** toggles the speaker (saved). **?** opens a touch test.
 
 ## Building and flashing
