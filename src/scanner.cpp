@@ -72,8 +72,17 @@ void scannerBegin() {
   s->setWindow(90);
 }
 
-void scannerStart() {
+static void startBle() {
+  bleDone = false;
+  NimBLEScan* s = NimBLEDevice::getScan();
+  s->clearResults();
+  if (!s->start(BLE_SCAN_SECONDS, onBleDone, false)) bleDone = true;
+  phase = SCAN_BLE;
+}
+
+void scannerStart(ScanMode mode) {
   candCount = 0; wifiCount = 0; bleCount = 0;
+  if (mode == MODE_BLE) { startBle(); return; }
   WiFi.scanDelete();
   WiFi.scanNetworks(true, true);   // async, include hidden networks
   phase = SCAN_WIFI;
@@ -91,11 +100,8 @@ ScanPhase scannerPoll() {
       }
     }
     WiFi.scanDelete();
-    bleDone = false;
-    NimBLEScan* s = NimBLEDevice::getScan();
-    s->clearResults();
-    if (!s->start(BLE_SCAN_SECONDS, onBleDone, false)) bleDone = true;
-    phase = SCAN_BLE;
+    choose();
+    phase = SCAN_DONE;
   } else if (phase == SCAN_BLE) {
     if (!bleDone) return phase;
     NimBLEScanResults res = NimBLEDevice::getScan()->getResults();

@@ -115,7 +115,9 @@ bool releaseArmed = false;
 const Monster MASCOT = makeMonster(0x0B0DD1E5u, false);
 
 // ---------------------------------------------------------------- title
-const Btn B_SCAN  {30, 214, 180, 44, "SCAN!", GO, 4};
+const Btn B_WIFI  {14, 214, 102, 44, "WiFi scan", GO, 2};
+const Btn B_BT    {124, 214, 102, 44, "Bluetooth", rgb565(60, 120, 230), 2};
+ScanMode scanMode = MODE_WIFI;
 const Btn B_COLL  {30, 266, 180, 30, "Collection", BTN, 2};
 const Btn B_SOUND {6, 300, 74, 18, "", BTN2, 1};
 const Btn B_TEST  {214, 300, 20, 18, "?", BTN2, 1};
@@ -130,7 +132,8 @@ void enterTitle() {
   text("BUDDIES", 120, 50, 4, MINT);
   char buf[32];
   snprintf(buf, sizeof(buf), "Collection (%u)", (unsigned)collectionSize());
-  drawBtn(B_SCAN);
+  drawBtn(B_WIFI);
+  drawBtn(B_BT);
   drawBtn(B_COLL, buf);
   drawSoundBtn();
   drawBtn(B_TEST);
@@ -141,7 +144,8 @@ void updateTitle(uint32_t t) {
   showMonster(MASCOT, 120, 136, 100, t);
   int x, y;
   if (!touchTapped(x, y)) return;
-  if (hit(B_SCAN, x, y))  { sfxClick(); go(S_SCAN); }
+  if (hit(B_WIFI, x, y))      { sfxClick(); scanMode = MODE_WIFI; go(S_SCAN); }
+  else if (hit(B_BT, x, y))   { sfxClick(); scanMode = MODE_BLE; go(S_SCAN); }
   else if (hit(B_COLL, x, y)) { sfxClick(); collectionPage = 0; go(S_COLLECTION); }
   else if (hit(B_SOUND, x, y)) { setSoundOn(!soundOn()); saveSoundSetting(soundOn()); sfxClick(); drawSoundBtn(); }
   else if (hit(B_TEST, x, y)) { go(S_TOUCHTEST); }
@@ -153,8 +157,8 @@ uint32_t lastPing = 0;
 void enterScan() {
   tft.fillScreen(BG);
   text("SCANNING", 120, 22, 4, GOLD);
-  text("Hold still...", 120, 48, 2, DIM);
-  scannerStart();
+  text(scanMode == MODE_WIFI ? "Looking for WiFi networks" : "Looking for Bluetooth gadgets", 120, 48, 2, DIM);
+  scannerStart(scanMode);
   countScan();
   lastPing = 0;
 }
@@ -190,7 +194,8 @@ void updateScan(uint32_t t) {
   if (p == SCAN_DONE && t >= WILD_SCAN_MIN_MS) {
     ScanResult r = scannerResult();
     char buf[40];
-    snprintf(buf, sizeof(buf), "%u WiFi, %u Bluetooth signals", r.wifiCount, r.bleCount);
+    if (scanMode == MODE_WIFI) snprintf(buf, sizeof(buf), "%u WiFi networks nearby", r.wifiCount);
+    else                       snprintf(buf, sizeof(buf), "%u Bluetooth gadgets nearby", r.bleCount);
     text(buf, 120, 272, 2, DIM);
     wild = makeMonster(r.seed, r.night);
     wildLv = wildLevel(wild);
@@ -351,7 +356,7 @@ void updateCapture(uint32_t t) {
 }
 
 // ---------------------------------------------------------------- result
-const Btn B_AGAIN {10, 270, 130, 40, "Scan again", GO, 2};
+const Btn B_AGAIN {10, 270, 130, 40, "Scan again", GO, 2};   // same mode as last time
 const Btn B_HOME  {150, 270, 80, 40, "Home", BTN2, 2};
 
 void enterResult() {

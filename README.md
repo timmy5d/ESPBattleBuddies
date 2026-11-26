@@ -32,7 +32,8 @@ Rarity: Common, Uncommon, Rare, Legendary.
 
 ## Controls
 
-- **SCAN!** runs the radar, then shows what you found.
+- **WiFi scan** or **Bluetooth** runs the radar for that kind of signal, then
+  shows what you found. **Scan again** repeats the last kind.
 - **CAPTURE** starts the mini-game: tap when the red marker is in the green
   zone (gold centre = perfect). Rarer buddies have smaller zones and faster
   markers. You get three tries.

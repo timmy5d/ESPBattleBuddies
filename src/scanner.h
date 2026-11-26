@@ -16,8 +16,9 @@ struct ScanResult {
 };
 
 enum ScanPhase : uint8_t { SCAN_IDLE, SCAN_WIFI, SCAN_BLE, SCAN_DONE };
+enum ScanMode  : uint8_t { MODE_WIFI, MODE_BLE };
 
 void      scannerBegin();
-void      scannerStart();        // non-blocking; call scannerPoll() every frame
+void      scannerStart(ScanMode mode);   // non-blocking; call scannerPoll() every frame
 ScanPhase scannerPoll();
 ScanResult scannerResult();
