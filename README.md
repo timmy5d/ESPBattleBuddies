@@ -3,7 +3,8 @@
 An original pocket monster game for the ESP32-2432S028R "Cheap Yellow
 Display" (2.8" 240x320 touch screen). Scan the radio signals around you to
 discover a buddy, capture it with a timing mini-game, and build a collection.
-Battles between two boards are coming in v0.2.
+Then battle with it in Rock Paper Scissors Lizard Spock; battles between
+two boards are next.
 
 ![Sixteen buddies drawn by the firmware's renderer](docs/buddies.png)
 
@@ -46,6 +47,14 @@ Rarity: Common, Uncommon, Rare, Legendary.
 - Capturing a buddy you already own gives it XP instead, and it levels up.
 - **Collection** shows your buddies, 9 per page. Tap one for its stats, or to
   release it.
+- **Battle** (on a buddy's stats page) fights a wild buddy near its level.
+  Every turn you both throw Rock, Paper, Scissors, Lizard or Spock (the usual
+  rules: scissors cuts paper, Spock vaporizes rock...). The winner of the throw
+  hits, harder with more ATK against less DEF. On a tie the faster buddy gets
+  a small scrape in. Each element has a favoured throw worth +50% damage
+  (highlighted in your buddy's colour): Stone Rock, Moss Paper, Volt Scissors,
+  Ember Lizard, Shade Spock. Tide has none but always lands a half hit on
+  ties. Win to earn XP; **Run** leaves the battle.
 - **Sound** toggles the speaker (saved). **?** opens a touch test.
 
 ## Building and flashing
@@ -83,11 +92,14 @@ These boards come in a few variants. Settings live in `platformio.ini` and
 | `src/render.*` | Draws a monster from its traits at any size |
 | `src/scanner.*` | WiFi + Bluetooth scan and signal pick |
 | `src/storage.*` | Collection saved in flash (NVS) |
+| `src/battle.*` | Battle rules (RPSLS throws, damage, AI), no hardware |
 | `src/hw.*` | Touch, sound, RGB LED, light sensor |
 | `src/main.cpp` | Screens and game flow |
 
 ## Roadmap
 
-- **v0.1** scan, capture, collect (this)
-- **v0.2** battles between two boards over ESP-NOW, type advantages
+- **v0.1** scan, capture, collect
+- **v0.2** battles: Rock Paper Scissors Lizard Spock against a computer
+  buddy (done), then between two boards over ESP-NOW (the battle core is
+  deterministic, so boards only need to swap seed, level and each throw)
 - later: trading, evolutions, an optional UART barcode module

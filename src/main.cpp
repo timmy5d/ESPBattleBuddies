@@ -1,6 +1,7 @@
 // BattleBuddies v0.1 - scan, capture and collect monsters on an ESP32 CYD.
 #include <Arduino.h>
 #include <TFT_eSPI.h>
+#include "battle.h"
 #include "config.h"
 #include "hw.h"
 #include "monster.h"
@@ -98,7 +99,7 @@ void showMonster(const Monster& m, int cx, int cy, int size, uint32_t t, uint16_
 }
 
 // ---------------------------------------------------------------- state
-enum Screen { S_TITLE, S_SCAN, S_PICK, S_ENCOUNTER, S_CAPTURE, S_RESULT, S_COLLECTION, S_DETAIL, S_TOUCHTEST };
+enum Screen { S_TITLE, S_SCAN, S_PICK, S_ENCOUNTER, S_CAPTURE, S_RESULT, S_COLLECTION, S_DETAIL, S_TOUCHTEST, S_BATTLE, S_BATTLE_END };
 Screen screen = S_TITLE;
 uint32_t screenStart = 0;
 void go(Screen s);
@@ -580,8 +581,9 @@ void updateCollection(uint32_t) {
 
 // ---------------------------------------------------------------- detail
 Monster detailMon;
-const Btn B_DBACK {10, 284, 100, 30, "Back", BTN2, 2};
-const Btn B_FREE  {130, 284, 100, 30, "Release", RED, 2};
+const Btn B_DBACK {6, 284, 70, 30, "Back", BTN2, 2};
+const Btn B_FIGHT {84, 284, 72, 30, "Battle", GO, 2};
+const Btn B_FREE  {164, 284, 70, 30, "Release", RED, 2};
 
 void statBar(const char* label, uint16_t v, int y, uint16_t c) {
   char buf[8];
@@ -615,6 +617,7 @@ void enterDetail() {
   snprintf(buf, sizeof(buf), "%s  -  XP %u/%u", SRC[min<uint8_t>(2, ownedSource(o))], o.xp, xpForNext(o.level));
   text(buf, 120, 10, 1, DIM);
   drawBtn(B_DBACK);
+  drawBtn(B_FIGHT);
   drawBtn(B_FREE);
 }
 
@@ -623,11 +626,298 @@ void updateDetail(uint32_t t) {
   int x, y;
   if (!touchTapped(x, y)) return;
   if (hit(B_DBACK, x, y)) { sfxClick(); go(S_COLLECTION); }
+  else if (hit(B_FIGHT, x, y)) { sfxClick(); go(S_BATTLE); }
   else if (hit(B_FREE, x, y)) {
     sfxClick();
     if (!releaseArmed) { releaseArmed = true; drawBtn(B_FREE, "Sure?"); }
     else { removeOwned(detailIndex); sfxFled(); go(S_COLLECTION); }
   }
+}
+
+// ---------------------------------------------------------------- battle
+// Player's buddy (from the detail screen) vs a computer-controlled wild buddy.
+// The rules live in battle.*; this section only draws and reads taps.
+// Two small sprites would not fit next to the big one for long, so the battle
+// borrows a 96x96 sprite while it runs and frees it again afterwards.
+const int BSPR = 96;
+TFT_eSprite bspr(&tft);
+bool haveBspr = false;
+
+Battle battle;
+TurnResult lastTurn;
+enum BattlePhase { BP_CHOOSE, BP_REVEAL, BP_RESULT } bPhase;
+uint32_t bPhaseAt;
+uint8_t  bMove[2];
+float    shownHp[2];
+bool     battleFled;
+uint16_t battleXpGained;
+bool     battleLevelUp;
+
+const Btn B_MOVE[MOVE_COUNT] = {
+  {6, 244, 72, 34, "Rock", BTN, 2},   {84, 244, 72, 34, "Paper", BTN, 2},
+  {162, 244, 72, 34, "Scissors", BTN, 2},
+  {6, 284, 72, 34, "Lizard", BTN, 2}, {84, 284, 72, 34, "Spock", BTN, 2},
+};
+const Btn B_FLEE {162, 284, 72, 34, "Run", BTN2, 2};
+
+// Where each side's monster and info panel sit (0 = player, bottom-left).
+const int MON_X[2] = {58, 182}, MON_Y[2] = {162, 70};
+const int PNL_X[2] = {112, 6},  PNL_Y[2] = {132, 28};
+const int PNL_W = 122, PNL_H = 58;
+
+void battleFreeSprite() {
+  if (haveBspr) { bspr.deleteSprite(); haveBspr = false; }
+}
+
+void drawHpBar(int side) {
+  const Fighter& f = battle.f[side];
+  int x = PNL_X[side] + 8, y = PNL_Y[side] + 40, w = PNL_W - 16;
+  int hp = (int)(shownHp[side] + 0.5f);
+  int fill = f.maxHp ? hp * w / f.maxHp : 0;
+  uint16_t c = hp * 2 > f.maxHp ? rgb565(90, 220, 120) : hp * 5 > f.maxHp ? GOLD : RED;
+  tft.fillRect(x, y, w, 7, shade565(PANEL, 50));
+  tft.fillRect(x, y, fill, 7, c);
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%3d/%u", hp, f.maxHp);
+  text(buf, PNL_X[side] + PNL_W - 8, PNL_Y[side] + 28, 1, INK, MR_DATUM, PANEL);
+}
+
+void drawFighterPanel(int side) {
+  const Fighter& f = battle.f[side];
+  int x = PNL_X[side], y = PNL_Y[side];
+  tft.fillRoundRect(x, y, PNL_W, PNL_H, 8, PANEL);
+  tft.fillRect(x + 8, y + PNL_H - 6, PNL_W - 16, 3, elementColor(f.mon.element));
+  text(f.mon.name, x + 8, y + 11, 2, INK, ML_DATUM, PANEL);
+  char buf[24];
+  snprintf(buf, sizeof(buf), "Lv%u %s", f.level, elementName(f.mon.element));
+  text(buf, x + 8, y + 28, 1, side ? DIM : MINT, ML_DATUM, PANEL);
+  drawHpBar(side);
+}
+
+void drawMoveButtons(bool active) {
+  uint8_t fav = favouredMove(battle.f[0].mon.element);
+  for (uint8_t m = 0; m < MOVE_COUNT; m++) {
+    Btn b = B_MOVE[m];
+    if (m == fav) b.color = shade565(elementColor(battle.f[0].mon.element), 70);
+    if (!active && m != bMove[0]) b.color = shade565(b.color, 45);
+    drawBtn(b);
+  }
+  Btn f = B_FLEE;
+  if (!active) f.color = shade565(f.color, 45);
+  drawBtn(f);
+}
+
+void battleMessage(const char* line1, uint16_t c1, const char* line2, uint16_t c2) {
+  tft.fillRect(0, 210, 240, 32, BG);
+  if (line1) text(line1, 120, 218, 2, c1);
+  if (line2) text(line2, 120, 234, 2, c2);
+}
+
+void enterBattle() {
+  Owned o = collectionAt(detailIndex);
+  Monster mine = makeMonster(o.seed, ownedNight(o));
+  Monster foe  = makeMonster(esp_random(), false);
+  battleBegin(battle, mine, o.level, foe, opponentLevel(o.level, esp_random()), esp_random());
+  shownHp[0] = battle.f[0].hp;
+  shownHp[1] = battle.f[1].hp;
+  bPhase = BP_CHOOSE;
+  bMove[0] = bMove[1] = NO_MOVE;
+  battleFled = false;
+  if (!haveBspr) {
+    bspr.setColorDepth(16);
+    haveBspr = bspr.createSprite(BSPR, BSPR) != nullptr;
+  }
+
+  ledForElement(foe.element);
+  sfxFound();
+  tft.fillScreen(BG);
+  starfield(foe.seed);
+  text("A wild buddy wants to battle!", 120, 10, 1, GOLD);
+  drawFighterPanel(1);
+  drawFighterPanel(0);
+  if (!haveBspr) {   // no memory for the sprite: draw once, no animation
+    drawMonster(tft, battle.f[0].mon, MON_X[0], MON_Y[0], 72);
+    drawMonster(tft, battle.f[1].mon, MON_X[1], MON_Y[1], 72);
+  }
+  battleMessage("Pick a throw!", INK, nullptr, INK);
+  drawMoveButtons(true);
+}
+
+// Draws one fighter; the side that just lost the throw shakes and flashes.
+void drawBattler(int side, uint32_t t) {
+  if (!haveBspr) return;
+  const Fighter& f = battle.f[side];
+  int dx = 0;
+  uint16_t bg = BG;
+  bool hurt = bPhase == BP_RESULT && lastTurn.damage[side] > 0;
+  uint32_t since = millis() - bPhaseAt;
+  if (hurt && since < 450) {
+    dx = (since / 45) % 2 ? 4 : -4;
+    if (since < 140) bg = shade565(RED, 45);
+  }
+  bool down = f.hp == 0 && bPhase == BP_RESULT && since >= 450;
+  int bob = down ? 10 : (int)(sinf((t + side * 700) / 260.0f) * 3);
+  bool blink = down || ((t + side * 1100) % 3200) < 140;
+  bspr.fillSprite(bg);
+  drawMonster(bspr, f.mon, BSPR / 2 + dx, BSPR / 2 + bob, down ? 60 : 72, blink);
+  bspr.pushSprite(MON_X[side] - BSPR / 2, MON_Y[side] - BSPR / 2);
+}
+
+void showTurnResult() {
+  const TurnResult& r = lastTurn;
+  char l1[40], l2[44];
+  uint16_t c1 = INK, c2 = INK;
+  if (r.winner >= 0) {
+    uint8_t w = r.move[r.winner], l = r.move[1 - r.winner];
+    snprintf(l1, sizeof(l1), "%s %s %s!", moveName(w), moveVerb(w, l), moveName(l));
+    uint16_t d = r.damage[1 - r.winner];
+    const char* who = r.winner == 0 ? "Foe takes" : "You take";
+    if (r.favoured)
+      snprintf(l2, sizeof(l2), "%s bonus! %s %u", elementName(battle.f[r.winner].mon.element), who, d);
+    else
+      snprintf(l2, sizeof(l2), "%s %u damage", who, d);
+    c1 = r.winner == 0 ? MINT : RED;
+    c2 = r.favoured ? GOLD : INK;
+    if (r.winner == 0) { sfxThrow(); ledColor(0, 1, 0); } else { sfxMiss(); ledColor(1, 0, 0); }
+  } else {
+    snprintf(l1, sizeof(l1), "%s vs %s: a tie!", moveName(r.move[0]), moveName(r.move[1]));
+    bool tide0 = battle.f[0].mon.element == TIDE, tide1 = battle.f[1].mon.element == TIDE;
+    if (r.damage[0] && r.damage[1])
+      snprintf(l2, sizeof(l2), "Both get scraped (-%u / -%u)", r.damage[0], r.damage[1]);
+    else if (r.damage[1])
+      snprintf(l2, sizeof(l2), tide0 ? "Tide flows! Foe -%u" : "You're faster! Foe -%u", r.damage[1]);
+    else if (r.damage[0])
+      snprintf(l2, sizeof(l2), tide1 ? "Foe's Tide flows! You -%u" : "Foe is faster! You -%u", r.damage[0]);
+    else
+      snprintf(l2, sizeof(l2), "Nobody budges");
+    c1 = GOLD;
+    sfxClick();
+    ledColor(1, 1, 0);
+  }
+  battleMessage(l1, c1, l2, c2);
+}
+
+void updateBattle(uint32_t t) {
+  drawBattler(1, t);
+  drawBattler(0, t);
+  for (int s = 0; s < 2; s++) {   // HP bars slide down instead of jumping
+    float target = battle.f[s].hp;
+    if (shownHp[s] > target) {
+      shownHp[s] = max(target, shownHp[s] - max(0.6f, (shownHp[s] - target) * 0.12f));
+      drawHpBar(s);
+    }
+  }
+  uint32_t now = millis(), since = now - bPhaseAt;
+  int x, y;
+
+  switch (bPhase) {
+    case BP_CHOOSE:
+      if (!touchTapped(x, y)) return;
+      if (hit(B_FLEE, x, y)) {
+        sfxFled();
+        battleFled = true;
+        go(S_BATTLE_END);
+        return;
+      }
+      for (uint8_t m = 0; m < MOVE_COUNT; m++) {
+        if (!hit(B_MOVE[m], x, y)) continue;
+        sfxClick();
+        bMove[0] = m;
+        bMove[1] = aiChooseMove(battle, 1, esp_random());
+        drawMoveButtons(false);
+        char buf[40];
+        snprintf(buf, sizeof(buf), "You: %s   Foe: %s", moveName(bMove[0]), moveName(bMove[1]));
+        battleMessage("Ready... throw!", DIM, buf, INK);
+        bPhase = BP_REVEAL;
+        bPhaseAt = now;
+        return;
+      }
+      return;
+
+    case BP_REVEAL:
+      if (since < 750) return;
+      lastTurn = battleTurn(battle, bMove[0], bMove[1]);
+      showTurnResult();
+      bPhase = BP_RESULT;
+      bPhaseAt = now;
+      return;
+
+    case BP_RESULT:
+      if (battleOver(battle)) {
+        if (since > 1900) go(S_BATTLE_END);
+        return;
+      }
+      if (since < 1500) return;
+      ledForElement(battle.f[1].mon.element);
+      bPhase = BP_CHOOSE;
+      bMove[0] = NO_MOVE;
+      touchTapped(x, y);   // ignore taps made during the reveal
+      battleMessage("Pick a throw!", INK, nullptr, INK);
+      drawMoveButtons(true);
+      return;
+  }
+}
+
+// ---------------------------------------------------------------- battle end
+const Btn B_REMATCH {10, 270, 130, 40, "Battle again", GO, 2};
+const Btn B_BDONE   {150, 270, 80, 40, "Back", BTN2, 2};
+
+void enterBattleEnd() {
+  battleFreeSprite();
+  bool won = !battleFled && battleWinner(battle) == 0;
+  battleXpGained = 0;
+  battleLevelUp = false;
+  if (won) {   // XP for the winner, same rules as re-capturing a buddy
+    int idx = findOwned(battle.f[0].mon.seed, battle.f[0].mon.night);
+    if (idx >= 0) {
+      Owned o = collectionAt(idx);
+      battleXpGained = battleXp(battle.f[1]);
+      o.xp += battleXpGained;
+      uint8_t before = o.level;
+      while (o.level < 99 && o.xp >= xpForNext(o.level)) { o.xp -= xpForNext(o.level); o.level++; }
+      updateOwned(idx, o);
+      battleLevelUp = o.level > before;
+      detailIndex = idx;
+    }
+  }
+  tft.fillScreen(BG);
+  starfield(battle.f[1].mon.seed ^ 99);
+  char buf[48];
+  if (battleFled) {
+    ledOff();
+    text("Got away", 120, 24, 4, DIM);
+    snprintf(buf, sizeof(buf), "You left %s behind", battle.f[1].mon.name);
+    text(buf, 120, 228, 2, INK);
+  } else if (won) {
+    sfxCaught();
+    ledColor(0, 1, 0);
+    text("Victory!", 120, 24, 4, MINT);
+    snprintf(buf, sizeof(buf), "%s beat %s (Lv %u)", battle.f[0].mon.name, battle.f[1].mon.name, battle.f[1].level);
+    text(buf, 120, 222, 2, INK);
+    Owned o = collectionAt(detailIndex);
+    if (battleLevelUp) snprintf(buf, sizeof(buf), "+%u XP - Level up! Now Lv %u", battleXpGained, o.level);
+    else               snprintf(buf, sizeof(buf), "+%u XP  (%u/%u)", battleXpGained, o.xp, xpForNext(o.level));
+    text(buf, 120, 244, 2, battleLevelUp ? GOLD : MINT);
+  } else {
+    sfxFled();
+    ledColor(1, 0, 0);
+    text("Defeated", 120, 24, 4, RED);
+    snprintf(buf, sizeof(buf), "%s was too strong", battle.f[1].mon.name);
+    text(buf, 120, 222, 2, INK);
+    text("Level up your buddy and try again", 120, 244, 1, DIM);
+  }
+  drawBtn(B_REMATCH);
+  drawBtn(B_BDONE);
+}
+
+void updateBattleEnd(uint32_t t) {
+  // Winner (or your buddy, if you ran) takes the stage.
+  bool lost = !battleFled && battleWinner(battle) == 1;
+  showMonster(battle.f[lost ? 1 : 0].mon, 120, 128, 110, t);
+  int x, y;
+  if (!touchTapped(x, y)) return;
+  if (hit(B_REMATCH, x, y)) { sfxClick(); go(S_BATTLE); }
+  else if (hit(B_BDONE, x, y)) { sfxClick(); go(S_DETAIL); }
 }
 
 // ---------------------------------------------------------------- touch test
@@ -668,6 +958,8 @@ void go(Screen s) {
     case S_COLLECTION: enterCollection(); break;
     case S_DETAIL:     enterDetail(); break;
     case S_TOUCHTEST:  enterTouchTest(); break;
+    case S_BATTLE:     enterBattle(); break;
+    case S_BATTLE_END: enterBattleEnd(); break;
   }
 }
 
@@ -700,6 +992,8 @@ void loop() {
     case S_COLLECTION: updateCollection(t); break;
     case S_DETAIL:     updateDetail(t); break;
     case S_TOUCHTEST:  updateTouchTest(t); break;
+    case S_BATTLE:     updateBattle(t); break;
+    case S_BATTLE_END: updateBattleEnd(t); break;
   }
   delay(16);
 }
