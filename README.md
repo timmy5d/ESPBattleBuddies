@@ -8,6 +8,9 @@ catch it, and build a collection. Then take your team up against Battle Bot
 
 ![Sixteen buddies drawn by the firmware's renderer](docs/buddies.png)
 
+**New to the game? Read the [Player Guide](docs/MANUAL.md)** for every
+screen, option and rule, plus how to flash a CYD board.
+
 ## How scanning works
 
 The board has no barcode reader, so it listens instead. It scans for nearby
