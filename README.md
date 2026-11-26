@@ -5,6 +5,8 @@ Display" (2.8" 240x320 touch screen). Scan the radio signals around you to
 discover a buddy, capture it with a timing mini-game, and build a collection.
 Battles between two boards are coming in v0.2.
 
+![Sixteen buddies drawn by the firmware's renderer](docs/buddies.png)
+
 ## How scanning works
 
 The board has no barcode reader, so it listens instead. It scans for nearby

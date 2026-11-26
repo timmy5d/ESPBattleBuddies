@@ -82,6 +82,8 @@ Monster makeMonster(uint32_t seed, bool night) {
   m.eyeStyle = r.below(EYE_COUNT);
   m.eyes     = 1 + r.below(10) / 4;          // 1,2 mostly; 3 sometimes
   if (m.eyes > 3) m.eyes = 3;
+  // Flame tails only on hot-blooded types; Ember buddies always get one.
+  if (m.tail == TAIL_FLAME && m.element != EMBER && m.element != VOLT) m.tail = TAIL_PLAIN;
   if (m.element == EMBER && m.tail == TAIL_PLAIN) m.tail = TAIL_FLAME;
 
   const uint8_t* p = PALETTE[m.element][r.below(3)];
