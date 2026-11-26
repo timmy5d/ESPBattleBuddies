@@ -32,8 +32,14 @@ Rarity: Common, Uncommon, Rare, Legendary.
 
 ## Controls
 
-- **WiFi scan** or **Bluetooth** runs the radar for that kind of signal, then
-  shows what you found. **Scan again** repeats the last kind.
+- **WiFi scan** or **Bluetooth** runs the radar for that kind of signal.
+  **Scan again** repeats the last kind.
+- When the scan finishes, every signal it heard (up to the 16 strongest) shows
+  up as a blip on the radar. Closer to the middle means a stronger signal, the
+  colour is the element of the buddy living there, and a white ring means you
+  already have it. Tap a blip to see the network or gadget name, then tap
+  **Track it!** (or the same blip again) to meet that buddy. **Run** takes you
+  back to the radar so you can pick another.
 - **CAPTURE** starts the mini-game: tap when the red marker is in the green
   zone (gold centre = perfect). Rarer buddies have smaller zones and faster
   markers. You get three tries.

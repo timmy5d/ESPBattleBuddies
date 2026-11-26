@@ -98,7 +98,7 @@ void showMonster(const Monster& m, int cx, int cy, int size, uint32_t t, uint16_
 }
 
 // ---------------------------------------------------------------- state
-enum Screen { S_TITLE, S_SCAN, S_ENCOUNTER, S_CAPTURE, S_RESULT, S_COLLECTION, S_DETAIL, S_TOUCHTEST };
+enum Screen { S_TITLE, S_SCAN, S_PICK, S_ENCOUNTER, S_CAPTURE, S_RESULT, S_COLLECTION, S_DETAIL, S_TOUCHTEST };
 Screen screen = S_TITLE;
 uint32_t screenStart = 0;
 void go(Screen s);
@@ -154,10 +154,23 @@ void updateTitle(uint32_t t) {
 // ---------------------------------------------------------------- scanning
 uint32_t lastPing = 0;
 
+// Real signals shown on the radar once a scan is done (see the pick screen).
+const int MAX_BLIPS = 16;
+struct Blip { int16_t x, y; uint16_t color; bool owned; };
+Blip blips[MAX_BLIPS];
+int blipCount = 0;      // 0 while scanning: the radar shows decoy blips instead
+int pickSel = -1;       // selected blip, -1 = none
+bool pickNight = false;
+bool encounterFromPick = false;   // "Run" goes back to the radar instead of home
+const int RADAR_CX = 120, RADAR_CY = 150, RADAR_R = 70;
+
 void enterScan() {
   tft.fillScreen(BG);
   text("SCANNING", 120, 22, 4, GOLD);
   text(scanMode == MODE_WIFI ? "Looking for WiFi networks" : "Looking for Bluetooth gadgets", 120, 48, 2, DIM);
+  blipCount = 0;
+  pickSel = -1;
+  encounterFromPick = false;
   scannerStart(scanMode);
   countScan();
   lastPing = 0;
@@ -165,7 +178,7 @@ void enterScan() {
 
 void drawRadar(uint32_t t) {
   if (!haveSprite) return;
-  const int c = SPR / 2, R = 70;
+  const int c = SPR / 2, R = RADAR_R;
   const uint16_t green = rgb565(60, 220, 120);
   spr.fillSprite(BG);
   spr.fillCircle(c, c, R, rgb565(10, 40, 30));
@@ -177,13 +190,30 @@ void drawRadar(uint32_t t) {
     float ai = a - i * 0.06f;
     spr.drawLine(c, c, c + cosf(ai) * R, c + sinf(ai) * R, shade565(green, 100 - i * 11));
   }
-  uint32_t s = 0xC0FFEEu ^ (t / 900);   // a few blips that change now and then
-  for (int i = 0; i < 4; i++) {
-    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-    float ba = (s % 628) / 100.0f, br = 15 + (s >> 10) % (R - 20);
-    spr.fillCircle(c + cosf(ba) * br, c + sinf(ba) * br, 3, rgb565(180, 255, 200));
+  if (blipCount == 0) {
+    uint32_t s = 0xC0FFEEu ^ (t / 900);   // a few blips that change now and then
+    for (int i = 0; i < 4; i++) {
+      s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+      float ba = (s % 628) / 100.0f, br = 15 + (s >> 10) % (R - 20);
+      spr.fillCircle(c + cosf(ba) * br, c + sinf(ba) * br, 3, rgb565(180, 255, 200));
+    }
+  } else {
+    // Weakest first, so the strong (close) ones are drawn on top.
+    for (int i = blipCount - 1; i >= 0; i--) {
+      const Blip& b = blips[i];
+      int bx = b.x - (RADAR_CX - c), by = b.y - (RADAR_CY - c);
+      spr.fillCircle(bx, by, 5, b.color);
+      spr.drawCircle(bx, by, 5, b.owned ? INK : shade565(b.color, 50));
+    }
+    if (pickSel >= 0) {   // pulsing ring on the chosen one
+      const Blip& b = blips[pickSel];
+      int bx = b.x - (RADAR_CX - c), by = b.y - (RADAR_CY - c);
+      int pr = 8 + (t / 120) % 4;
+      spr.drawCircle(bx, by, pr, GOLD);
+      spr.drawCircle(bx, by, pr + 1, GOLD);
+    }
   }
-  spr.pushSprite(120 - c, 150 - c);
+  spr.pushSprite(RADAR_CX - c, RADAR_CY - c);
 }
 
 void updateScan(uint32_t t) {
@@ -197,13 +227,113 @@ void updateScan(uint32_t t) {
     if (scanMode == MODE_WIFI) snprintf(buf, sizeof(buf), "%u WiFi networks nearby", r.wifiCount);
     else                       snprintf(buf, sizeof(buf), "%u Bluetooth gadgets nearby", r.bleCount);
     text(buf, 120, 272, 2, DIM);
+    delay(500);
+    pickNight = r.night;
+    if (scannerSignalCount() > 0) { go(S_PICK); return; }
+    // Nothing heard at all: straight to a buddy "in the static".
     wild = makeMonster(r.seed, r.night);
     wildLv = wildLevel(wild);
     wildSource = r.source;
     wildRssi = r.rssi;
-    delay(500);
     go(S_ENCOUNTER);
   }
+}
+
+// ---------------------------------------------------------------- pick a signal
+// After a scan, every signal heard becomes a blip on the radar: closer to the
+// middle = stronger signal, colour = the element of the buddy living there,
+// white ring = you already own it. Tap a blip, then "Track it!".
+const Btn B_TRACK {10, 272, 140, 40, "Track it!", GO, 4};
+const Btn B_PBACK {160, 272, 70, 40, "Back", BTN2, 2};
+
+void placeBlips() {
+  blipCount = min(MAX_BLIPS, scannerSignalCount());
+  for (int i = 0; i < blipCount; i++) {
+    ScanSignal s = scannerSignal(i);
+    Monster m = makeMonster(s.seed, pickNight);
+    // Strength -30 dBm (right here) .. -95 dBm (far away) maps to the radius.
+    int r = map(constrain(s.rssi, -95, -30), -30, -95, 10, RADAR_R - 8);
+    float a = (s.seed % 628) / 100.0f;   // the same signal always sits at the same bearing
+    blips[i].x = RADAR_CX + (int)(cosf(a) * r);
+    blips[i].y = RADAR_CY + (int)(sinf(a) * r);
+    blips[i].color = elementColor(m.element);
+    blips[i].owned = findOwned(s.seed, pickNight) >= 0;
+  }
+}
+
+void drawPickInfo() {
+  tft.fillRect(0, 230, 240, 38, BG);
+  if (pickSel < 0) {
+    text("Tap a blip to pick a signal", 120, 240, 2, INK);
+    text("middle = strongest, colour = element", 120, 258, 1, DIM);
+    return;
+  }
+  ScanSignal s = scannerSignal(pickSel);
+  char name[24];
+  if (s.name[0]) snprintf(name, sizeof(name), "%s", s.name);
+  else           snprintf(name, sizeof(name), s.source == SRC_WIFI ? "(hidden network)" : "(unnamed gadget)");
+  text(name, 120, 240, 2, INK);
+  char buf[40];
+  snprintf(buf, sizeof(buf), "%d dBm%s", s.rssi, blips[pickSel].owned ? "  -  already caught" : "");
+  text(buf, 120, 258, 1, DIM);
+}
+
+void drawTrackBtn() {
+  if (pickSel >= 0) drawBtn(B_TRACK);
+  else {
+    Btn off = B_TRACK; off.color = shade565(BTN2, 70);
+    drawBtn(off);
+  }
+}
+
+void enterPick() {
+  tft.fillScreen(BG);
+  text("PICK A SIGNAL", 120, 22, 4, GOLD);
+  char buf[40];
+  int n = scannerSignalCount();
+  if (scanMode == MODE_WIFI) snprintf(buf, sizeof(buf), "%d WiFi network%s found", n, n == 1 ? "" : "s");
+  else                       snprintf(buf, sizeof(buf), "%d Bluetooth gadget%s found", n, n == 1 ? "" : "s");
+  if (n > MAX_BLIPS) snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " (%d closest)", MAX_BLIPS);
+  text(buf, 120, 48, 2, DIM);
+  placeBlips();
+  if (pickSel >= blipCount) pickSel = -1;
+  if (!haveSprite) {   // no sprite memory: draw the blips straight on the screen once
+    for (int i = 0; i < blipCount; i++) tft.fillCircle(blips[i].x, blips[i].y, 5, blips[i].color);
+  }
+  drawPickInfo();
+  drawTrackBtn();
+  drawBtn(B_PBACK);
+}
+
+void trackSelected() {
+  ScanSignal s = scannerSignal(pickSel);
+  wild = makeMonster(s.seed, pickNight);
+  wildLv = wildLevel(wild);
+  wildSource = s.source;
+  wildRssi = s.rssi;
+  encounterFromPick = true;
+  go(S_ENCOUNTER);
+}
+
+void updatePick(uint32_t t) {
+  drawRadar(t);
+  int x, y;
+  if (!touchTapped(x, y)) return;
+  if (hit(B_PBACK, x, y)) { sfxClick(); go(S_TITLE); return; }
+  if (hit(B_TRACK, x, y)) { if (pickSel >= 0) { sfxClick(); trackSelected(); } return; }
+  // Nearest blip within reach of the finger.
+  int best = -1, bestD = 18 * 18;
+  for (int i = 0; i < blipCount; i++) {
+    int dx = blips[i].x - x, dy = blips[i].y - y, d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  if (best < 0) return;
+  sfxClick();
+  if (best == pickSel) { trackSelected(); return; }   // second tap on the same blip tracks it
+  pickSel = best;
+  ledColor(0, 1, 0);
+  drawPickInfo();
+  drawTrackBtn();
 }
 
 // ---------------------------------------------------------------- encounter
@@ -242,7 +372,7 @@ void updateEncounter(uint32_t t) {
   int x, y;
   if (!touchTapped(x, y)) return;
   if (hit(B_CATCH, x, y)) { sfxClick(); go(S_CAPTURE); }
-  else if (hit(B_RUN, x, y)) { sfxClick(); go(S_TITLE); }
+  else if (hit(B_RUN, x, y)) { sfxClick(); go(encounterFromPick ? S_PICK : S_TITLE); }
 }
 
 // ---------------------------------------------------------------- capture mini-game
@@ -531,6 +661,7 @@ void go(Screen s) {
   switch (s) {
     case S_TITLE:      enterTitle(); break;
     case S_SCAN:       enterScan(); break;
+    case S_PICK:       enterPick(); break;
     case S_ENCOUNTER:  enterEncounter(); break;
     case S_CAPTURE:    enterCapture(); break;
     case S_RESULT:     enterResult(); break;
@@ -562,6 +693,7 @@ void loop() {
   switch (screen) {
     case S_TITLE:      updateTitle(t); break;
     case S_SCAN:       updateScan(t); break;
+    case S_PICK:       updatePick(t); break;
     case S_ENCOUNTER:  updateEncounter(t); break;
     case S_CAPTURE:    updateCapture(t); break;
     case S_RESULT:     updateResult(t); break;

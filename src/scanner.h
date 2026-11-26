@@ -18,7 +18,18 @@ struct ScanResult {
 enum ScanPhase : uint8_t { SCAN_IDLE, SCAN_WIFI, SCAN_BLE, SCAN_DONE };
 enum ScanMode  : uint8_t { MODE_WIFI, MODE_BLE };
 
+// One signal heard in the last scan, strongest first. The player can pick
+// one on the radar instead of letting the scanner choose.
+struct ScanSignal {
+  uint32_t seed;
+  uint8_t  source;     // Source enum from monster.h
+  int8_t   rssi;
+  char     name[21];   // WiFi network name or Bluetooth device name ("" if none)
+};
+
 void      scannerBegin();
 void      scannerStart(ScanMode mode);   // non-blocking; call scannerPoll() every frame
 ScanPhase scannerPoll();
-ScanResult scannerResult();
+ScanResult scannerResult();      // the scanner's own pick (used for "surprise me" and when nothing is heard)
+int        scannerSignalCount(); // signals from the last finished scan
+ScanSignal scannerSignal(int i); // 0 = strongest
