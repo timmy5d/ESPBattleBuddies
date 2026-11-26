@@ -90,6 +90,35 @@ These boards come in a few variants. Settings live in `platformio.ini` and
   reading at boot; adjust `LIGHT_DARK_THRESHOLD`.
 - **Too loud:** lower `SOUND_VOLUME`.
 
+## Round AMOLED version (Waveshare ESP32-S3 1.43")
+
+The same game also runs on the Waveshare **ESP32-S3-Touch-AMOLED-1.43**
+(466x466 round AMOLED, capacitive touch; the CNC metal case version is sold
+as the "-1.43-B"). Same buddies, battles, Bot 9000 and save format; only the
+screens are laid out for a circle.
+
+```sh
+pio run -e amoled143 -t upload
+```
+
+What's different on this board, and what stands in for it:
+
+| CYD part | On the round board |
+| --- | --- |
+| Light sensor (night forms) | The on-board clock (PCF85063). Night forms appear from 20:00 to 06:00. Set the time with **Clock** on the title screen; until it's set there are no night forms. The clock keeps time while the board has power (or an RTC battery). |
+| RGB LED | A glow ring round the edge of the screen in the same colours |
+| Speaker | None on this board, so the game is silent |
+| Resistive touch | Capacitive (FT3168); if taps land in the wrong place use the touch test (**?**) and the `TOUCH_*` flags in `src/round/board.h` |
+
+The panel is driven over QSPI (SH8601 or CO5300, detected at start-up). The
+game draws into a full-screen canvas in PSRAM and only the changed area is
+sent to the panel each frame.
+
+`tools/round_preview/make_previews.sh` builds the round screens on a PC and
+renders every one to PNG, handy for checking layouts without flashing.
+
+![Every screen of the round version](docs/round_screens.png)
+
 ## Code map
 
 | File | What it does |
@@ -101,6 +130,7 @@ These boards come in a few variants. Settings live in `platformio.ini` and
 | `src/battle.*` | Battle rules (RPSLS throws, damage, AI), no hardware |
 | `src/hw.*` | Touch, sound, RGB LED, light sensor |
 | `src/main.cpp` | Screens and game flow |
+| `src/round/` | Round AMOLED board: display driver, hardware layer, round screens |
 
 ## Roadmap
 

@@ -19,8 +19,12 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install platformio
-      - run: pio run -e cyd
+      - run: pio run -e cyd -e amoled143
       - uses: actions/upload-artifact@v4
         with:
           name: battlebuddies-firmware
           path: .pio/build/cyd/firmware.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: battlebuddies-amoled143-firmware
+          path: .pio/build/amoled143/firmware.bin
